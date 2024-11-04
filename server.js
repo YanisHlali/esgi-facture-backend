@@ -10,24 +10,19 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-app.get("/api/factures", (req, res) => {
-  const sql = "SELECT * FROM factures";
-  db.query(sql, (err, rows) => {
-    if (err) {
-      console.error(
-        "Erreur lors de la récupération des factures:",
-        err.message
-      );
-      res
-        .status(500)
-        .json({ error: "Erreur lors de la récupération des factures." });
-    } else {
-      res.json(rows);
-    }
-  });
+app.get("/api/factures", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM factures");
+    res.json(rows);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des factures:", err.message);
+    res
+      .status(500)
+      .json({ error: "Erreur lors de la récupération des factures." });
+  }
 });
 
-app.post("/api/factures", (req, res) => {
+app.post("/api/factures", async (req, res) => {
   const {
     id_regles_gestion,
     nom_client,
@@ -54,19 +49,18 @@ app.post("/api/factures", (req, res) => {
     "en attente",
   ];
 
-  db.query(sql, params, (err, result) => {
-    if (err) {
-      console.error("Erreur lors de l'insertion de la facture:", err.message);
-      res
-        .status(500)
-        .json({ error: "Erreur lors de la création de la facture." });
-    } else {
-      res.status(200).json({
-        message: "Facture créée avec succès",
-        factureId: result.insertId,
-      });
-    }
-  });
+  try {
+    const [result] = await db.query(sql, params);
+    res.status(200).json({
+      message: "Facture créée avec succès",
+      factureId: result.insertId,
+    });
+  } catch (err) {
+    console.error("Erreur lors de l'insertion de la facture:", err.message);
+    res
+      .status(500)
+      .json({ error: "Erreur lors de la création de la facture." });
+  }
 });
 
 app.get("/api/factures/generer/:factureId", async (req, res) => {
@@ -80,12 +74,10 @@ app.get("/api/factures/generer/:factureId", async (req, res) => {
     WHERE factures.id = ?
   `;
 
-  db.query(sql, [factureId], async (err, rows) => {
-    if (err || rows.length === 0) {
-      console.error(
-        "Erreur lors de la récupération de la facture:",
-        err ? err.message : "Facture introuvable"
-      );
+  try {
+    const [rows] = await db.query(sql, [factureId]);
+
+    if (rows.length === 0) {
       return res.status(404).json({ error: "Facture introuvable." });
     }
 
@@ -124,7 +116,6 @@ app.get("/api/factures/generer/:factureId", async (req, res) => {
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       );
-
       res.send(buffer);
     } else if (format === "pdf") {
       res.setHeader(
@@ -148,16 +139,22 @@ app.get("/api/factures/generer/:factureId", async (req, res) => {
         .status(400)
         .json({ error: 'Format non supporté. Utilisez "docx" ou "pdf".' });
     }
-  });
+  } catch (err) {
+    console.error("Erreur lors de la génération de la facture:", err.message);
+    res
+      .status(500)
+      .json({ error: "Erreur lors de la génération de la facture." });
+  }
 });
 
-app.get("/api/factures/next-number", (req, res) => {
+app.get("/api/factures/next-number", async (req, res) => {
   const { id_regles_gestion, date_creation } = req.query;
 
-  const sqlRegle = "SELECT format_numero FROM regles_gestion WHERE id = ?";
-  db.query(sqlRegle, [id_regles_gestion], (err, regleRows) => {
-    if (err || regleRows.length === 0) {
-      console.error("Erreur lors de la récupération de la règle de gestion:", err ? err.message : "Règle introuvable");
+  try {
+    const [regleRows] = await db.query("SELECT format_numero FROM regles_gestion WHERE id = ?", [id_regles_gestion]);
+    
+    if (regleRows.length === 0) {
+      console.error("Règle de gestion introuvable.");
       return res.status(404).json({ error: "Règle de gestion introuvable." });
     }
 
@@ -170,40 +167,37 @@ app.get("/api/factures/next-number", (req, res) => {
       FROM factures
       WHERE id_client = ? AND YEAR(date_creation) = ? AND MONTH(date_creation) = ?
     `;
+    
+    const [result] = await db.query(sqlNumero, [id_regles_gestion, annee, mois]);
+    
+    const dernierNumero = result[0].dernier_numero ? parseInt(result[0].dernier_numero) : 0;
+    const numero = dernierNumero + 1;
 
-    db.query(sqlNumero, [id_regles_gestion, annee, mois], (err, result) => {
-      if (err) {
-        console.error("Erreur lors de la récupération du dernier numéro:", err.message);
-        return res.status(500).json({ error: "Erreur lors de la génération du numéro de facture." });
-      }
+    // Génère le numéro de facture en utilisant le format de la règle de gestion
+    const numero_facture = formatNumero
+      .replace("{nom_client}", `Client-${id_regles_gestion}`)
+      .replace("{annee}", annee)
+      .replace("{mois}", mois)
+      .replace("{numero}", String(numero).padStart(3, "0"));
 
-      const dernierNumero = result[0].dernier_numero ? parseInt(result[0].dernier_numero) : 0;
-      const numero = dernierNumero + 1;
-
-      const numero_facture = formatNumero
-        .replace("{nom_client}", `Client-${id_regles_gestion}`)
-        .replace("{annee}", annee)
-        .replace("{mois}", mois)
-        .replace("{numero}", String(numero).padStart(3, "0"));
-
-      res.json({ numero_facture });
-    });
-  });
+    res.json({ numero_facture });
+  } catch (err) {
+    console.error("Erreur lors de la génération du numéro de facture:", err.message);
+    res.status(500).json({ error: "Erreur lors de la génération du numéro de facture." });
+  }
 });
 
-app.get("/api/clients", (req, res) => {
-  const sql = "SELECT id, nom FROM clients";
-  db.query(sql, (err, rows) => {
-    if (err) {
-      console.error("Erreur lors de la récupération des clients:", err.message);
-      res.status(500).json({ error: "Erreur lors de la récupération des clients." });
-    } else {
-      res.json(rows);
-    }
-  });
+app.get("/api/clients", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT id, nom FROM clients");
+    res.json(rows);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des clients:", err.message);
+    res.status(500).json({ error: "Erreur lors de la récupération des clients." });
+  }
 });
 
-app.post("/api/clients", (req, res) => {
+app.post("/api/clients", async (req, res) => {
   const { nom_client, adresse, siret } = req.body;
   console.log(req.body);
 
@@ -214,43 +208,54 @@ app.post("/api/clients", (req, res) => {
   const sql = "INSERT INTO clients (nom, adresse, siret) VALUES (?, ?, ?)";
   const params = [nom_client, adresse, siret];
 
-  db.query(sql, params, (err, result) => {
-    if (err) {
-      console.error("Erreur lors de l'insertion du client:", err.message);
-      res.status(500).json({ error: "Erreur lors de l'ajout du client.", details: err.message });
-    } else {
-      res.status(200).json({ message: "Client ajouté avec succès", clientId: result.insertId });
-    }
-  });
+  try {
+    const [result] = await db.query(sql, params);
+    res.status(200).json({
+      message: "Client ajouté avec succès",
+      clientId: result.insertId,
+    });
+  } catch (err) {
+    console.error("Erreur lors de l'insertion du client:", err.message);
+    res.status(500).json({
+      error: "Erreur lors de l'ajout du client.",
+      details: err.message,
+    });
+  }
 });
 
-app.get("/api/regles-gestion", (req, res) => {
+app.get("/api/regles-gestion", async (req, res) => {
   const sql = "SELECT id, description FROM regles_gestion";
-  db.query(sql, (err, rows) => {
-    if (err) {
-      console.error("Erreur lors de la récupération des règles de gestion:", err.message);
-      res.status(500).json({ error: "Erreur lors de la récupération des règles de gestion." });
-    } else {
-      res.json(rows);
-    }
-  });
+
+  try {
+    const [rows] = await db.query(sql);
+    res.json(rows);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des règles de gestion:", err.message);
+    res.status(500).json({
+      error: "Erreur lors de la récupération des règles de gestion.",
+    });
+  }
 });
+
 
 // marquer une facture en changant le statu de "en attente" à "payée"
-app.put("/api/factures/:factureId", (req, res) => {
+app.put("/api/factures/:factureId", async (req, res) => {
   const { factureId } = req.params;
   const sql = "UPDATE factures SET status = 'payée' WHERE id = ?";
-  db.query(sql, [factureId], (err, result) => {
-    if (err) {
-      console.error("Erreur lors de la mise à jour de la facture:", err.message);
-      res.status(500).json({ error: "Erreur lors de la mise à jour de la facture." });
-    } else {
-      res.status(200).json({ message: "Facture marquée comme payée." });
+
+  try {
+    const [result] = await db.query(sql, [factureId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Facture non trouvée." });
     }
-  });
+
+    res.status(200).json({ message: "Facture marquée comme payée." });
+  } catch (err) {
+    console.error("Erreur lors de la mise à jour de la facture:", err.message);
+    res.status(500).json({ error: "Erreur lors de la mise à jour de la facture." });
+  }
 });
-
-
 
 app.listen(PORT, () => {
   console.log(`Serveur en cours d'exécution sur http://localhost:${PORT}`);
