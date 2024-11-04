@@ -236,7 +236,19 @@ app.get("/api/regles-gestion", (req, res) => {
   });
 });
 
-
+// marquer une facture en changant le statu de "en attente" à "payée"
+app.put("/api/factures/:factureId", (req, res) => {
+  const { factureId } = req.params;
+  const sql = "UPDATE factures SET status = 'payée' WHERE id = ?";
+  db.query(sql, [factureId], (err, result) => {
+    if (err) {
+      console.error("Erreur lors de la mise à jour de la facture:", err.message);
+      res.status(500).json({ error: "Erreur lors de la mise à jour de la facture." });
+    } else {
+      res.status(200).json({ message: "Facture marquée comme payée." });
+    }
+  });
+});
 
 
 
