@@ -191,6 +191,55 @@ app.get("/api/factures/next-number", (req, res) => {
   });
 });
 
+app.get("/api/clients", (req, res) => {
+  const sql = "SELECT id, nom FROM clients";
+  db.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Erreur lors de la récupération des clients:", err.message);
+      res.status(500).json({ error: "Erreur lors de la récupération des clients." });
+    } else {
+      res.json(rows);
+    }
+  });
+});
+
+app.post("/api/clients", (req, res) => {
+  const { nom_client, adresse, siret } = req.body;
+  console.log(req.body);
+
+  if (!nom_client || !siret) {
+    return res.status(400).json({ error: "Nom du client et SIRET sont requis." });
+  }
+
+  const sql = "INSERT INTO clients (nom, adresse, siret) VALUES (?, ?, ?)";
+  const params = [nom_client, adresse, siret];
+
+  db.query(sql, params, (err, result) => {
+    if (err) {
+      console.error("Erreur lors de l'insertion du client:", err.message);
+      res.status(500).json({ error: "Erreur lors de l'ajout du client.", details: err.message });
+    } else {
+      res.status(200).json({ message: "Client ajouté avec succès", clientId: result.insertId });
+    }
+  });
+});
+
+app.get("/api/regles-gestion", (req, res) => {
+  const sql = "SELECT id, description FROM regles_gestion";
+  db.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Erreur lors de la récupération des règles de gestion:", err.message);
+      res.status(500).json({ error: "Erreur lors de la récupération des règles de gestion." });
+    } else {
+      res.json(rows);
+    }
+  });
+});
+
+
+
+
+
 app.listen(PORT, () => {
   console.log(`Serveur en cours d'exécution sur http://localhost:${PORT}`);
 });
