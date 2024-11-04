@@ -96,85 +96,101 @@ app.get("/api/factures/generer/:factureId", async (req, res) => {
   const { factureId } = req.params;
   const { format } = req.query;
 
-  const sql = `
+  const sqlFacture = `
     SELECT factures.*, regles_gestion.format_numero
     FROM factures
     JOIN regles_gestion ON factures.id_client = regles_gestion.id_client
     WHERE factures.id = ?
   `;
 
+  const sqlObjets = `
+    SELECT * FROM objet_facture WHERE idFacture = ?
+  `;
+
   try {
-    const [rows] = await db.query(sql, [factureId]);
+    const [factureRows] = await db.query(sqlFacture, [factureId]);
+    const [objetsRows] = await db.query(sqlObjets, [factureId]);
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "Facture introuvable." });
-    }
+    if (!factureRows.length) return res.status(404).json({ error: "Facture introuvable." });
+    if (!objetsRows.length) return res.status(404).json({ error: "Aucun objet trouvé pour cette facture." });
 
-    const facture = rows[0];
+    const facture = factureRows[0];
+    const objets = objetsRows;
+    const safeFilename = `${facture.numero_facture.replace(/[^a-zA-Z0-9]/g, "_")}.${format}`;
     const { numero_facture, date_creation, montant_total_ttc } = facture;
-    const safeFilename = `${numero_facture.replace(
-      /[^a-zA-Z0-9]/g,
-      "_"
-    )}.${format}`;
 
     if (format === "docx") {
-      const doc = new Document({
-        sections: [
-          {
-            properties: {},
-            children: [
-              new Paragraph({ text: "Facture", heading: "Heading1" }),
-              new Paragraph(`Numéro de facture : ${numero_facture}`),
-              new Paragraph(`Date de création : ${date_creation}`),
-              new Paragraph(
-                `Montant total TTC : ${parseFloat(montant_total_ttc).toFixed(
-                  2
-                )} €`
-              ),
-            ],
-          },
-        ],
-      });
-
-      const buffer = await Packer.toBuffer(doc);
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${safeFilename}"`
-      );
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      );
-      res.send(buffer);
+      generateDocx(facture, objets, safeFilename, res);
     } else if (format === "pdf") {
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${safeFilename}"`
-      );
-      res.setHeader("Content-Type", "application/pdf");
-
-      const pdfDoc = new PDFDocument();
-      pdfDoc.pipe(res);
-      pdfDoc.fontSize(25).text("Facture", { align: "center" });
-      pdfDoc.moveDown();
-      pdfDoc.fontSize(14).text(`Numéro de facture : ${numero_facture}`);
-      pdfDoc.text(`Date de création : ${date_creation}`);
-      pdfDoc.text(
-        `Montant total TTC : ${parseFloat(montant_total_ttc).toFixed(2)} €`
-      );
-      pdfDoc.end();
+      generatePdf(facture, objets, safeFilename, res);
     } else {
-      res
-        .status(400)
-        .json({ error: 'Format non supporté. Utilisez "docx" ou "pdf".' });
+      res.status(400).json({ error: 'Format non supporté. Utilisez "docx" ou "pdf".' });
     }
   } catch (err) {
     console.error("Erreur lors de la génération de la facture:", err.message);
-    res
-      .status(500)
-      .json({ error: "Erreur lors de la génération de la facture." });
+    res.status(500).json({ error: "Erreur lors de la génération de la facture." });
   }
 });
+
+const generateDocx = (facture, objets, filename, res) => {
+  const { numero_facture, date_creation, montant_total_ttc } = facture;
+  const doc = new Document({
+    sections: [
+      {
+        children: [
+          new Paragraph({ text: "Facture", heading: "Heading1" }),
+          new Paragraph(`Numéro de facture : ${numero_facture}`),
+          new Paragraph(`Date de création : ${date_creation}`),
+          new Paragraph(`Montant total TTC : ${parseFloat(montant_total_ttc).toFixed(2)} €`),
+          new Paragraph({ text: "Objets de la facture :", heading: "Heading2" }),
+          ...objets.flatMap((objet) => [
+            new Paragraph({ text: `Nom: ${objet.nom}`, bold: true }),
+            new Paragraph(`Quantité: ${objet.quantite}`),
+            new Paragraph(`Prix unitaire HT: ${objet.prixunitaire} €`),
+            new Paragraph(`TVA: ${objet.tva}%`),
+            new Paragraph(`Total HT: ${objet.totalHT} €`),
+            new Paragraph(`Total TTC: ${objet.totalTTC} €`),
+            new Paragraph(""),
+          ]),
+        ],
+      },
+    ],
+  });
+
+  Packer.toBuffer(doc).then((buffer) => {
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.send(buffer);
+  });
+};
+
+const generatePdf = (facture, objets, filename, res) => {
+  const { numero_facture, date_creation, montant_total_ttc } = facture;
+  const pdfDoc = new PDFDocument();
+  pdfDoc.pipe(res);
+
+  pdfDoc.fontSize(20).text("Facture", { align: "center" }).moveDown();
+  pdfDoc.fontSize(14).text(`Numéro de facture : ${numero_facture}`);
+  pdfDoc.text(`Date de création : ${date_creation}`);
+  pdfDoc.text(`Montant total TTC : ${parseFloat(montant_total_ttc).toFixed(2)} €`).moveDown();
+
+  pdfDoc.fontSize(16).text("Objets de la facture :", { underline: true }).moveDown();
+  objets.forEach((objet) => {
+    pdfDoc.fontSize(12)
+      .text(`Nom: ${objet.nom}`, { continued: true })
+      .text(` | Quantité: ${objet.quantite}`, { continued: true })
+      .text(` | Prix unitaire HT: ${objet.prixunitaire} €`, { continued: true })
+      .text(` | TVA: ${objet.tva}%`, { continued: true })
+      .text(` | Total HT: ${objet.totalHT} €`, { continued: true })
+      .text(` | Total TTC: ${objet.totalTTC} €`)
+      .moveDown();
+  });
+
+  pdfDoc.end();
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Type", "application/pdf");
+};
+
 
 app.get("/api/factures/next-number", async (req, res) => {
   const { id_regles_gestion, date_creation } = req.query;
