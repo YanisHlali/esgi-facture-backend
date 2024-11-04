@@ -146,7 +146,7 @@ const generateDocx = (facture, objets, filename, res) => {
           new Paragraph({
             children: [
               new TextRun({
-                text: facture.nom_client,
+                text: facture.numero_facture + "(" + facture.status + ")",
                 bold: true,
                 size: 48,
                 color: "2E86C1",
