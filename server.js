@@ -41,6 +41,10 @@ app.post("/api/factures", async (req, res) => {
     INSERT INTO factures (id_client, numero_facture, date_creation, montant_total_ttc, status)
     VALUES (?, ?, ?, ?, ?)
   `;
+  const sqlObjets = `
+    INSERT INTO objet_facture (idFacture, nom, quantite, prixunitaire, tva, totalHT, totalTTC)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
   const params = [
     id_regles_gestion,
     numero_facture,
@@ -51,9 +55,33 @@ app.post("/api/factures", async (req, res) => {
 
   try {
     const [result] = await db.query(sql, params);
+    const factureId = result.insertId; // Store the facture ID after insertion
+
+    console.log("Facture ID:", factureId);
+    console.log("Objets:", objets);
+    for (const objet of objets) {
+      const paramsObjets = [
+        factureId, // Use the facture ID here
+        objet.objet,
+        objet.quantite,
+        objet.prix_unitaire_ht,
+        objet.tva,
+        objet.total_ht,
+        objet.total_ttc,
+      ];
+      try {
+        await db.query(sqlObjets, paramsObjets);
+      } catch (err) {
+        console.error("Erreur lors de l'insertion des objets de la facture:", err.message);
+        return res
+          .status(500)
+          .json({ error: "Erreur lors de l'insertion des objets de la facture." });
+      }
+    }
+
     res.status(200).json({
       message: "Facture créée avec succès",
-      factureId: result.insertId,
+      factureId: factureId,
     });
   } catch (err) {
     console.error("Erreur lors de l'insertion de la facture:", err.message);
@@ -62,6 +90,7 @@ app.post("/api/factures", async (req, res) => {
       .json({ error: "Erreur lors de la création de la facture." });
   }
 });
+
 
 app.get("/api/factures/generer/:factureId", async (req, res) => {
   const { factureId } = req.params;
@@ -152,7 +181,7 @@ app.get("/api/factures/next-number", async (req, res) => {
 
   try {
     const [regleRows] = await db.query("SELECT format_numero FROM regles_gestion WHERE id = ?", [id_regles_gestion]);
-    
+
     if (regleRows.length === 0) {
       console.error("Règle de gestion introuvable.");
       return res.status(404).json({ error: "Règle de gestion introuvable." });
@@ -167,9 +196,9 @@ app.get("/api/factures/next-number", async (req, res) => {
       FROM factures
       WHERE id_client = ? AND YEAR(date_creation) = ? AND MONTH(date_creation) = ?
     `;
-    
+
     const [result] = await db.query(sqlNumero, [id_regles_gestion, annee, mois]);
-    
+
     const dernierNumero = result[0].dernier_numero ? parseInt(result[0].dernier_numero) : 0;
     const numero = dernierNumero + 1;
 
