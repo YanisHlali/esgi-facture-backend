@@ -1,10 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const db = require("./database");
-const { Document, Packer, Paragraph, TextRun } = require("docx");
+const { Document, Packer, Paragraph } = require("docx");
 const PDFDocument = require("pdfkit");
-const path = require("path");
-const fs = require("fs");
 
 const app = express();
 const PORT = 5000;
